@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
 
 export default function Login() {
@@ -7,6 +8,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [okMsg, setOkMsg] = useState("");
+
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,28 +20,50 @@ export default function Login() {
     const password = e.target.password.value;
 
     if (!recaptchaToken) {
-      setErrorMsg("請先完成 I'm not a robot 驗證");
+      setErrorMsg("Please complete the \"I'm not a robot\" verification.");
+      return;
+    }
+
+    const apiBase = process.env.REACT_APP_API_URL;
+    if (!apiBase) {
+      setErrorMsg("API base URL is not configured. Please set REACT_APP_API_URL.");
       return;
     }
 
     try {
       setLoading(true);
-      const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/login`, {
+
+      const res = await fetch(`${apiBase}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, recaptcha_token: recaptchaToken }),
+        body: JSON.stringify({
+          email,
+          password,
+          recaptcha_token: recaptchaToken,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setErrorMsg(data.message || "登入失敗，請確認帳號、密碼與驗證");
+
+      if (!res.ok || !data.ok) {
+        // Try to provide clearer reasons
+        if (res.status === 401) {
+          setErrorMsg("Invalid email or password.");
+        } else if (res.status === 400) {
+          setErrorMsg("reCAPTCHA validation failed. Please try again.");
+        } else if (res.status === 403) {
+          setErrorMsg("Access forbidden. Please contact the administrator.");
+        } else {
+          setErrorMsg(data.error || data.message || "Sign-in failed. Please check your credentials and verification.");
+        }
         return;
       }
-      setOkMsg("登入成功（reCAPTCHA 後端驗證 OK）");
-      // TODO: 保存 JWT、導向 dashboard
+
+      setOkMsg("Signed in successfully (reCAPTCHA validated). Redirecting...");
+      setTimeout(() => navigate("/dashboard"), 800);
     } catch (err) {
-      setErrorMsg("無法連線伺服器，請稍後再試");
       console.error(err);
+      setErrorMsg("Unable to reach the server. Please try again later.");
     } finally {
       setLoading(false);
     }
@@ -123,9 +148,11 @@ export default function Login() {
           </button>
         </form>
 
-        {/* Debug Info for CORS issue */}
+        {/* Debug Info for missing API base */}
         {!process.env.REACT_APP_API_URL && (
-          <p className="mt-2 text-xs text-red-500 text-center">⚠️ Missing REACT_APP_API_URL in .env</p>
+          <p className="mt-2 text-xs text-red-500 text-center">
+            ⚠️ Missing REACT_APP_API_URL in .env
+          </p>
         )}
       </div>
     </div>
