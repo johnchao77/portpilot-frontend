@@ -41,7 +41,7 @@ export default function MyContainers() {
     (async () => {
       try {
         setLoading(true);
-        const r = await fetch(`${API_BASE}/MyContainers`);
+        const r = await fetch(`${API_BASE}/my-containers`);
         const j = await r.json();
         if (j?.ok) setRows(j.rows || []);
         else setError(j?.error || "Load failed");
@@ -83,7 +83,7 @@ export default function MyContainers() {
       setSaving(true);
       setError("");
       const payload = { rows: rows.map(normalizeForSave) };
-      const r = await fetch(`${API_BASE}/MyContainers`, {
+      const r = await fetch(`${API_BASE}/my-containers`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
