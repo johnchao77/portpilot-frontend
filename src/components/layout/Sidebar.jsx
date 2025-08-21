@@ -14,6 +14,8 @@ export default function Sidebar({ open, onClose }) {
         <nav className="px-2 space-y-1">
           <Item to="/dashboard" label="Overview" />
           <Item to="/drayage" label="Drayage" />
+          {/* ➕ 新增 MyContainers Table */}
+          <Item to="/my-containers" label="MyContainers" />
           <Item to="/appointments" label="Appointments" />
           <Item to="/reports" label="Reports" />
         </nav>

@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import PortPilotLoginPage from "./pages/PortPilotLoginPage";
 import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
+import MyContainers from "./pages/MyContainers";
 
 export default function App() {
   return (
@@ -24,8 +25,18 @@ export default function App() {
           }
         />
 
+        <Route
+          path="/my-containers"
+          element={
+            <ProtectedRoute>
+              <MyContainers />
+            </ProtectedRoute>
+          }
+        />
+
         {/* 未匹配到的路徑，統一回登入頁 */}
         <Route path="*" element={<Navigate to="/login" replace />} />
+
       </Routes>
     </BrowserRouter>
   );
