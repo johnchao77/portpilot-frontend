@@ -1,173 +1,284 @@
 // src/pages/MyContainers.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
-  DATE_FIELDS, DATETIME_FIELDS,
-  toDisplayDate, toDisplayDateTime,
-  toISODate, toISODateTime
-} from "../utils/dataFormatters";
+  toDisplayDate,
+  toDisplayDateTime,
+  normalizeDateInput,
+} from "../utils/dateFormatters";
 
 const API_BASE = process.env.REACT_APP_API_URL || "https://api.portpilot.co";
 
+// 欄位定義（完全比照 Excel）
 const COLUMNS = [
-  // 依你的實際欄位調整；未來要增刪欄位只改這裡
-  "BOL","SO","Container","SCAC","Truck #","Plate #",
-  "ETD","ETA","Arrived","LFD","Appt Date","LRD","Returned Date",
-  "Delivered DateTime","Emptied DateTime",
-  "Terminal","Steamship Line","Consignee","Notes"
+  { key: "order_no", label: "Order No", width: 180 },
+  { key: "status", label: "Status", width: 110 },
+  { key: "drayage", label: "Drayage", width: 110 },
+  { key: "warehouse", label: "Warehouse", width: 110 },
+  { key: "mbl_no", label: "MBL No", width: 150 },
+  { key: "container", label: "Container No", width: 140 },
+  { key: "etd", label: "ETD", width: 110, type: "date" },
+  { key: "eta", label: "ETA", width: 110, type: "date" },
+  { key: "pod", label: "POD", width: 150 },
+  { key: "arrived", label: "Arrived", width: 110, type: "date" },
+  { key: "lfd", label: "LFD", width: 110, type: "date" },
+  { key: "appt_date", label: "Appt Date", width: 130, type: "date" },
+  { key: "lrd", label: "LRD", width: 110, type: "date" },
+  { key: "delivered_dt", label: "Delivered DateTime", width: 180, type: "datetime" },
+  { key: "emptied_dt", label: "Emptied DateTime", width: 170, type: "datetime" },
+  { key: "returned_date", label: "Returned Date", width: 130, type: "date" },
 ];
 
-const display = (key, val) => {
-  if (DATE_FIELDS.includes(key)) return toDisplayDate(val);
-  if (DATETIME_FIELDS.includes(key)) return toDisplayDateTime(val);
-  return val ?? "";
-};
+const DATE_FIELDS = new Set(
+  COLUMNS.filter(c => c.type === "date").map(c => c.key)
+);
+const DATETIME_FIELDS = new Set(
+  COLUMNS.filter(c => c.type === "datetime").map(c => c.key)
+);
 
-const normalizeForSave = (row) => {
-  const out = { ...row };
-  DATE_FIELDS.forEach(k => { if (k in out) out[k] = toISODate(out[k]); });
-  DATETIME_FIELDS.forEach(k => { if (k in out) out[k] = toISODateTime(out[k]); });
-  return out;
-};
+const WIDTHS_KEY = "mycontainers.colwidths";
 
 export default function MyContainers() {
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [sortKey, setSortKey] = useState("");
+  const [sortDir, setSortDir] = useState(0); // 0: none, 1: asc, -1: desc
+  const [widths, setWidths] = useState(() => {
+    const saved = localStorage.getItem(WIDTHS_KEY);
+    if (saved) return JSON.parse(saved);
+    const w = {};
+    COLUMNS.forEach(c => (w[c.key] = c.width || 120));
+    return w;
+  });
 
-  // 初次載入：從雲端 DB 取資料
+  useEffect(() => {
+    localStorage.setItem(WIDTHS_KEY, JSON.stringify(widths));
+  }, [widths]);
+
   useEffect(() => {
     (async () => {
+      setLoading(true);
+      setErr("");
       try {
-        setLoading(true);
         const r = await fetch(`${API_BASE}/my-containers`);
         const j = await r.json();
-        if (j?.ok) setRows(j.rows || []);
-        else setError(j?.error || "Load failed");
+        if (!r.ok || !j.ok) throw new Error(j.error || "load failed");
+        setRows(j.rows || []);
       } catch (e) {
-        setError(String(e));
+        console.error(e);
+        setErr("Load failed.");
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  const onCellChange = (ri, key, val) => {
-    setRows(prev => {
-      const copy = [...prev];
-      const row = { ...copy[ri] };
-      // blur 時再格式化；輸入時先暫存原值
-      row[key] = val;
-      copy[ri] = row;
+  const onAddRow = () => {
+    setRows(r => [{}, ...r]);
+  };
+
+  const onCellChange = (idx, key, v) => {
+    setRows(r => {
+      const copy = [...r];
+      copy[idx] = { ...copy[idx], [key]: v };
       return copy;
     });
   };
 
-  const onCellBlur = (ri, key, val) => {
-    setRows(prev => {
-      const copy = [...prev];
-      const row = { ...copy[ri] };
-      if (DATE_FIELDS.includes(key)) row[key] = toDisplayDate(val);
-      else if (DATETIME_FIELDS.includes(key)) row[key] = toDisplayDateTime(val);
-      copy[ri] = row;
+  // 失焦時做正規化（日期自動補年份）
+  const onCellBlur = (idx, key) => {
+    setRows(r => {
+      const copy = [...r];
+      const val = copy[idx]?.[key];
+      if (val == null) return copy;
+
+      if (DATE_FIELDS.has(key)) {
+        const iso = normalizeDateInput(val, false);
+        copy[idx][key] = iso || "";
+      } else if (DATETIME_FIELDS.has(key)) {
+        const iso = normalizeDateInput(val, true);
+        copy[idx][key] = iso || "";
+      }
       return copy;
     });
   };
 
-  const addRow = () => setRows(prev => [...prev, Object.fromEntries(COLUMNS.map(c => [c, ""]))]);
-  const delRow = (ri) => setRows(prev => prev.filter((_, i) => i !== ri));
-
-  const saveAll = async () => {
+  const onSave = async () => {
+    setLoading(true);
+    setErr("");
     try {
-      setSaving(true);
-      setError("");
-      const payload = { rows: rows.map(normalizeForSave) };
       const r = await fetch(`${API_BASE}/my-containers`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ rows }),
       });
-      const j = await r.json();
-      if (!j?.ok) throw new Error(j?.error || "Save failed");
-      // 後端存的是 ISO；重新拉一次轉顯示
-      const rr = await fetch(`${API_BASE}/MyContainers`);
-      const jj = await rr.json();
-      if (jj?.ok) setRows(jj.rows || []);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "save failed");
     } catch (e) {
-      setError(String(e));
+      console.error(e);
+      setErr("Save failed.");
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const exportExcel = () => {
-    // 匯出時用當前顯示值
-    const data = rows.map(r => {
-      const obj = {};
-      COLUMNS.forEach(k => obj[k] = display(k, r[k]));
-      return obj;
-    });
+  const onExport = () => {
+    const aoa = [
+      COLUMNS.map(c => c.label),
+      ...rows.map(r =>
+        COLUMNS.map(c => formatForDisplay(r[c.key], c))
+      ),
+    ];
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(data);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
     XLSX.utils.book_append_sheet(wb, ws, "MyContainers");
     XLSX.writeFile(wb, "MyContainers.xlsx");
   };
 
-  const header = useMemo(() => COLUMNS, []);
+  // 排序
+  const sorted = useMemo(() => {
+    if (sortDir === 0 || !sortKey) return rows;
+    const isDate = DATE_FIELDS.has(sortKey);
+    const isDateTime = DATETIME_FIELDS.has(sortKey);
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      const va = a?.[sortKey] ?? "";
+      const vb = b?.[sortKey] ?? "";
+      if (isDate || isDateTime) {
+        const da = va ? new Date(va).getTime() : 0;
+        const db = vb ? new Date(vb).getTime() : 0;
+        return sortDir * (da - db);
+      }
+      // string / number 混合，皆用字串比較以簡化
+      return sortDir * String(va).localeCompare(String(vb));
+    });
+    return copy;
+  }, [rows, sortKey, sortDir]);
 
-  if (loading) return <div className="p-6">Loading…</div>;
+  // 欄寬拖拉
+  const dragRef = useRef({ col: "", startX: 0, startW: 0 });
+  const onDragStart = (e, colKey) => {
+    dragRef.current = { col: colKey, startX: e.clientX, startW: widths[colKey] || 120 };
+    window.addEventListener("mousemove", onDragging);
+    window.addEventListener("mouseup", onDragEnd);
+    e.preventDefault();
+  };
+  const onDragging = (e) => {
+    const { col, startX, startW } = dragRef.current;
+    if (!col) return;
+    const dx = e.clientX - startX;
+    const newW = Math.max(60, startW + dx);
+    setWidths(w => ({ ...w, [col]: newW }));
+  };
+  const onDragEnd = () => {
+    dragRef.current = { col: "", startX: 0, startW: 0 };
+    window.removeEventListener("mousemove", onDragging);
+    window.removeEventListener("mouseup", onDragEnd);
+  };
+
+  const toggleSort = (key) => {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir(1);
+    } else {
+      setSortDir(d => (d === 1 ? -1 : d === -1 ? 0 : 1));
+    }
+  };
+
   return (
-    <div className="p-6 space-y-3">
-      <div className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold">My Containers</h1>
-        <button onClick={addRow} className="px-3 py-1.5 rounded bg-gray-100 hover:bg-gray-200">+ Add Row</button>
-        <button onClick={saveAll} disabled={saving} className="px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-          {saving ? "Saving…" : "Save"}
+    <div className="p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <h1 className="text-xl font-bold">My Containers</h1>
+        <button className="px-3 py-1 rounded bg-gray-100 border" onClick={onAddRow}>
+          + Add Row
         </button>
-        <button onClick={exportExcel} className="px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700">Export Excel</button>
-        {error && <span className="text-red-600 text-sm ml-2">{error}</span>}
+        <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={onSave} disabled={loading}>
+          {loading ? "Saving..." : "Save"}
+        </button>
+        <button className="px-3 py-1 rounded bg-green-600 text-white" onClick={onExport}>
+          Export Excel
+        </button>
+        {err && <span className="text-red-600 ml-2">{err}</span>}
       </div>
 
       <div className="overflow-auto border rounded">
-        <table className="min-w-[900px] w-full border-collapse">
-          <thead className="bg-gray-50">
+        <table className="min-w-full border-collapse">
+          <thead>
             <tr>
-              <th className="border px-2 py-1 w-12">#</th>
-              {header.map(h => (
-                <th key={h} className="border px-2 py-1 text-left">{h}</th>
+              {COLUMNS.map(col => (
+                <th key={col.key}
+                    style={{ width: widths[col.key], minWidth: widths[col.key] }}
+                    className="sticky top-0 bg-white border-b px-2 py-2 text-left text-sm font-semibold relative select-none">
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => toggleSort(col.key)} className="text-left">
+                      {col.label}{sortKey === col.key ? (sortDir === 1 ? " ▲" : sortDir === -1 ? " ▼" : "") : ""}
+                    </button>
+                    <span
+                      onMouseDown={(e) => onDragStart(e, col.key)}
+                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize"
+                      style={{ userSelect: "none" }}
+                      title="Drag to resize"
+                    />
+                  </div>
+                </th>
               ))}
-              <th className="border px-2 py-1 w-16">Del</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, ri) => (
-              <tr key={ri} className="odd:bg-white even:bg-gray-50">
-                <td className="border px-2 py-1 text-center">{ri + 1}</td>
-                {header.map(k => (
-                  <td key={k} className="border px-1 py-0.5">
-                    <input
-                      className="w-full px-2 py-1 outline-none"
-                      value={r[k] ?? ""}
-                      onChange={e => onCellChange(ri, k, e.target.value)}
-                      onBlur={e => onCellBlur(ri, k, e.target.value)}
-                      placeholder={DATE_FIELDS.includes(k) ? "MM/DD/YY" : (DATETIME_FIELDS.includes(k) ? "MM/DD/YY hh:mm am/pm" : "")}
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={COLUMNS.length} className="text-center text-gray-500 py-8">
+                  No data.
+                </td>
+              </tr>
+            ) : sorted.map((row, idx) => (
+              <tr key={idx} className="border-t">
+                {COLUMNS.map(col => (
+                  <td key={col.key} style={{ width: widths[col.key], minWidth: widths[col.key] }} className="px-2 py-1 align-top">
+                    <Cell
+                      value={row[col.key]}
+                      col={col}
+                      onChange={(v) => onCellChange(idx, col.key, v)}
+                      onBlur={() => onCellBlur(idx, col.key)}
                     />
                   </td>
                 ))}
-                <td className="border px-2 py-1 text-center">
-                  <button onClick={() => delRow(ri)} className="text-red-600 hover:underline">Del</button>
-                </td>
               </tr>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={header.length + 2} className="text-center text-gray-500 py-6">No data.</td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
     </div>
   );
+}
+
+function Cell({ value, col, onChange, onBlur }) {
+  const display = formatForDisplay(value, col);
+  const [v, setV] = useState(display);
+
+  useEffect(() => {
+    setV(display);
+  }, [display]);
+
+  return (
+    <input
+      className="w-full border rounded px-2 py-1 text-sm"
+      value={v ?? ""}
+      onChange={(e) => {
+        setV(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={onBlur}
+      placeholder={col.type === "datetime" ? "mm/dd/yy hh:mm am/pm" :
+                   col.type === "date" ? "mm/dd/yy" : ""}
+    />
+  );
+}
+
+function formatForDisplay(val, col) {
+  if (!val) return "";
+  if (col.type === "date") return toDisplayDate(val);
+  if (col.type === "datetime") return toDisplayDateTime(val);
+  return String(val);
 }
