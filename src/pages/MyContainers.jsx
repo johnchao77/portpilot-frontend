@@ -421,12 +421,20 @@ function Cell({ value, col, onChange, onBlur }) {
 }
 
 /** 顯示用格式化（ISO -> UI） */
+// 只在 value 已是 ISO 才轉成 UI 友善格式；否則保持原樣（讓使用者能完整輸入）
 function formatForDisplay(val, col) {
   if (!val) return "";
-  if (col.type === "date") return toDisplayDate(val);
-  if (col.type === "datetime") return toDisplayDateTime(val);
+  if (col.type === "date") {
+    const iso = /^\d{4}-\d{2}-\d{2}$/.test(val);
+    return iso ? toDisplayDate(val) : String(val);
+  }
+  if (col.type === "datetime") {
+    const isoDT = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?$/.test(val);
+    return isoDT ? toDisplayDateTime(val) : String(val);
+  }
   return String(val);
 }
+
 
 /** 匯入用：把 Excel cell 轉成儲存格式（日期/時間 -> ISO；其它轉字串） */
 function normalizeCellForImport(cell, col) {
