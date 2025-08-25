@@ -6,6 +6,7 @@ import {
   toDisplayDateTime,
   normalizeDateInput,
 } from "../utils/dataFormatters";
+import ConfirmModal from "../components/ConfirmModal";
 
 const API_BASE = process.env.REACT_APP_API_URL || "https://api.portpilot.co";
 
@@ -35,22 +36,33 @@ const COLUMNS = [
   { key: "returned_date", label: "Returned Date", width: 130, type: "date" },
 ];
 
-const DATE_FIELDS = new Set(COLUMNS.filter(c => c.type === "date").map(c => c.key));
-const DATETIME_FIELDS = new Set(COLUMNS.filter(c => c.type === "datetime").map(c => c.key));
-const LABEL_TO_KEY = Object.fromEntries(COLUMNS.map(c => [c.label, c.key]));
+const DATE_FIELDS = new Set(COLUMNS.filter((c) => c.type === "date").map((c) => c.key));
+const DATETIME_FIELDS = new Set(COLUMNS.filter((c) => c.type === "datetime").map((c) => c.key));
 const WIDTHS_KEY = "mycontainers.colwidths";
+
+// 產生穩定的列 id（用來做勾選與刪除）
+const genId = () =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+// 確保每列都有 _id（舊資料沒有的話幫它補上）
+const ensureIds = (arr = []) => arr.map((r) => (r && r._id ? r : { _id: genId(), ...r }));
 
 export default function MyContainers() {
   const [rows, setRows] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [toDeleteCount, setToDeleteCount] = useState(0);
+
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [sortKey, setSortKey] = useState("");
   const [sortDir, setSortDir] = useState(0); // 0: none, 1: asc, -1: desc
+
   const [widths, setWidths] = useState(() => {
     const saved = localStorage.getItem(WIDTHS_KEY);
     if (saved) return JSON.parse(saved);
     const w = {};
-    COLUMNS.forEach(c => (w[c.key] = c.width || 120));
+    COLUMNS.forEach((c) => (w[c.key] = c.width || 120));
     return w;
   });
 
@@ -71,7 +83,7 @@ export default function MyContainers() {
         const r = await fetch(`${API_BASE}/my-containers`);
         const j = await r.json();
         if (!r.ok || !j.ok) throw new Error(j.error || "load failed");
-        setRows(j.rows || []);
+        setRows(ensureIds(j.rows || []));
       } catch (e) {
         console.error(e);
         setErr("Load failed.");
@@ -82,11 +94,36 @@ export default function MyContainers() {
   }, []);
 
   /** 新增一列 */
-  const onAddRow = () => setRows(r => [{}, ...r]);
+  const onAddRow = () => {
+    setRows((r) => [{ _id: genId() }, ...r]);
+  };
+
+  /** 勾選和刪除 */
+  const toggleSelect = (rowId, checked) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(rowId);
+      else next.delete(rowId);
+      return next;
+    });
+  };
+
+  const askDelete = () => {
+    const n = selectedIds.size;
+    if (n === 0) return;
+    setToDeleteCount(n);
+    setConfirmOpen(true);
+  };
+
+  const confirmDelete = () => {
+    setRows((prev) => prev.filter((r) => !selectedIds.has(r._id)));
+    setSelectedIds(new Set());
+    setConfirmOpen(false);
+  };
 
   /** cell 變更 */
   const onCellChange = (idx, key, v) => {
-    setRows(r => {
+    setRows((r) => {
       const copy = [...r];
       copy[idx] = { ...copy[idx], [key]: v };
       return copy;
@@ -95,7 +132,7 @@ export default function MyContainers() {
 
   /** 失焦：正規化日期/時間（自動補年份、轉 ISO） */
   const onCellBlur = (idx, key) => {
-    setRows(r => {
+    setRows((r) => {
       const copy = [...r];
       const val = copy[idx]?.[key];
       if (val == null) return copy;
@@ -134,8 +171,8 @@ export default function MyContainers() {
   /** 匯出 Excel */
   const onExport = () => {
     const aoa = [
-      COLUMNS.map(c => c.label),
-      ...rows.map(r => COLUMNS.map(c => formatForDisplay(r[c.key], c))),
+      COLUMNS.map((c) => c.label),
+      ...rows.map((r) => COLUMNS.map((c) => formatForDisplay(r[c.key], c))),
     ];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -159,18 +196,20 @@ export default function MyContainers() {
       const wb = XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       if (!sheet) throw new Error("No worksheet found.");
+
       // 以 AOA 讀進來（第一列是標題）
       const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
       if (aoa.length < 2) throw new Error("Worksheet has no data.");
 
-      const headers = (aoa[0] || []).map(h => String(h || "").trim());
+      const headers = (aoa[0] || []).map((h) => String(h || "").trim());
+
       // 2) 欄位檢查：必須完全符合
-      const expected = COLUMNS.map(c => c.label);
-      const missing = expected.filter(l => !headers.includes(l));
+      const expected = COLUMNS.map((c) => c.label);
+      const missing = expected.filter((l) => !headers.includes(l));
       if (missing.length > 0) {
         throw new Error(
           `Invalid columns.\nMissing: ${missing.join(", ")}\n` +
-          `Headers in file: ${headers.join(", ")}`
+            `Headers in file: ${headers.join(", ")}`
         );
       }
 
@@ -185,29 +224,25 @@ export default function MyContainers() {
         return obj;
       });
 
-      // 4) 問匯入模式
-      //   - append：加到現有資料（MBL No. 重複時：逐筆詢問 Overwrite / Skip / Cancel）
-      //   - overwrite：清空後完全以新資料取代
+      // 4) 匯入模式
       let mode = window.prompt(
         'Import mode: type "append" or "overwrite".\n- append: add to existing, ask on duplicates.\n- overwrite: replace all existing rows.',
         "append"
       );
       if (!mode) return;
       mode = mode.toLowerCase();
-
       if (mode !== "append" && mode !== "overwrite") {
         alert('Invalid mode. Use "append" or "overwrite".');
         return;
       }
 
       if (mode === "overwrite") {
-        setRows(importedRows);
+        setRows(importedRows.map((r) => ({ _id: genId(), ...r })));
         alert(`Imported ${importedRows.length} rows. Click "Save" to apply.`);
         return;
       }
 
       // mode === "append"
-      // 建立既有 MBL map（用小寫比對）
       const existingByMbl = new Map(
         rows.map((r, i) => [String(r.mbl_no || "").toLowerCase(), { idx: i, row: r }])
       );
@@ -218,14 +253,13 @@ export default function MyContainers() {
       for (const newRow of importedRows) {
         const mbl = String(newRow.mbl_no || "").trim();
         if (!mbl) {
-          // 無 MBL，直接加入（或可改成跳過）
-          merged.push(newRow);
+          merged.push({ _id: genId(), ...newRow });
           continue;
         }
 
         const key = mbl.toLowerCase();
         if (!existingByMbl.has(key)) {
-          merged.push(newRow);
+          merged.push({ _id: genId(), ...newRow });
           existingByMbl.set(key, { idx: merged.length - 1, row: newRow });
           continue;
         }
@@ -235,17 +269,18 @@ export default function MyContainers() {
           `Duplicate MBL No. "${mbl}".\nType "o" to Overwrite, "s" to Skip, "c" to Cancel import.`,
           "o"
         );
-        if (!action) { /* user pressed Esc => treat as skip */ continue; }
+        if (!action) continue;
 
         const a = action.toLowerCase();
-        if (a === "c") { cancelled = true; break; }
-        if (a === "s") { continue; }
+        if (a === "c") {
+          cancelled = true;
+          break;
+        }
+        if (a === "s") continue;
         if (a === "o") {
           const { idx } = existingByMbl.get(key);
-          merged[idx] = newRow;
-          continue;
+          merged[idx] = { _id: merged[idx]._id, ...newRow }; // 保留原本 _id
         }
-        // 其它輸入 => 視為 Skip
       }
 
       if (cancelled) {
@@ -293,7 +328,7 @@ export default function MyContainers() {
     if (!col) return;
     const dx = e.clientX - startX;
     const newW = Math.max(60, startW + dx);
-    setWidths(w => ({ ...w, [col]: newW }));
+    setWidths((w) => ({ ...w, [col]: newW }));
   };
   const onDragEnd = () => {
     dragRef.current = { col: "", startX: 0, startW: 0 };
@@ -306,7 +341,7 @@ export default function MyContainers() {
       setSortKey(key);
       setSortDir(1);
     } else {
-      setSortDir(d => (d === 1 ? -1 : d === -1 ? 0 : 1));
+      setSortDir((d) => (d === 1 ? -1 : d === -1 ? 0 : 1));
     }
   };
 
@@ -314,18 +349,45 @@ export default function MyContainers() {
     <div className="p-4">
       <div className="mb-2 flex items-center gap-2">
         <h1 className="text-xl font-bold">My Containers</h1>
+
         <button className="px-3 py-1 rounded bg-gray-100 border" onClick={onAddRow}>
           + Add Row
         </button>
-        <button className="px-3 py-1 rounded bg-blue-600 text-white" onClick={onSave} disabled={loading}>
+
+        <button
+          className="px-3 py-1 rounded bg-blue-600 text-white"
+          onClick={onSave}
+          disabled={loading}
+        >
           {loading ? "Saving..." : "Save"}
         </button>
+
         <button className="px-3 py-1 rounded bg-green-600 text-white" onClick={onExport}>
           Export Excel
         </button>
+
         <button className="px-3 py-1 rounded bg-amber-600 text-white" onClick={onClickImport}>
           Import Excel
         </button>
+
+        <button
+          type="button"
+          onClick={askDelete}
+          disabled={selectedIds.size === 0}
+          className={
+            selectedIds.size === 0
+              ? "px-3 py-1 rounded bg-gray-200 text-gray-500 cursor-not-allowed"
+              : "px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700"
+          }
+          title={
+            selectedIds.size
+              ? `Delete ${selectedIds.size} selected row(s)`
+              : "Select rows to enable"
+          }
+        >
+          Delete
+        </button>
+
         <input
           ref={fileInputRef}
           type="file"
@@ -333,6 +395,7 @@ export default function MyContainers() {
           className="hidden"
           onChange={onImportFile}
         />
+
         {err && <span className="text-red-600 ml-2">{err}</span>}
       </div>
 
@@ -340,7 +403,15 @@ export default function MyContainers() {
         <table className="min-w-full border-collapse">
           <thead>
             <tr>
-              {COLUMNS.map(col => (
+              {/* 勾選欄（Header） */}
+              <th
+                style={{ width: 36, minWidth: 36 }}
+                className="sticky top-0 bg-white border-b px-2 py-2"
+              >
+                &nbsp;
+              </th>
+
+              {COLUMNS.map((col) => (
                 <th
                   key={col.key}
                   style={{ width: widths[col.key], minWidth: widths[col.key] }}
@@ -349,7 +420,13 @@ export default function MyContainers() {
                   <div className="flex items-center gap-1">
                     <button onClick={() => toggleSort(col.key)} className="text-left">
                       {col.label}
-                      {sortKey === col.key ? (sortDir === 1 ? " ▲" : sortDir === -1 ? " ▼" : "") : ""}
+                      {sortKey === col.key
+                        ? sortDir === 1
+                          ? " ▲"
+                          : sortDir === -1
+                          ? " ▼"
+                          : ""
+                        : ""}
                     </button>
                     <span
                       onMouseDown={(e) => onDragStart(e, col.key)}
@@ -362,17 +439,28 @@ export default function MyContainers() {
               ))}
             </tr>
           </thead>
+
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={COLUMNS.length} className="text-center text-gray-500 py-8">
+                <td colSpan={COLUMNS.length + 1} className="text-center text-gray-500 py-8">
                   No data.
                 </td>
               </tr>
             ) : (
               sorted.map((row, idx) => (
-                <tr key={idx} className="border-t">
-                  {COLUMNS.map(col => (
+                <tr key={row._id ?? idx} className="border-t">
+                  {/* 每列最前面：核取方塊欄 */}
+                  <td style={{ width: 36, minWidth: 36 }} className="px-2 py-1 align-top">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(row._id)}
+                      onChange={(e) => toggleSelect(row._id, e.target.checked)}
+                    />
+                  </td>
+
+                  {/* 其餘欄位 */}
+                  {COLUMNS.map((col) => (
                     <td
                       key={col.key}
                       style={{ width: widths[col.key], minWidth: widths[col.key] }}
@@ -391,6 +479,18 @@ export default function MyContainers() {
             )}
           </tbody>
         </table>
+
+        <ConfirmModal
+          open={confirmOpen}
+          title="Remove selected rows"
+          message={`You’re about to remove ${toDeleteCount} selected ${
+            toDeleteCount === 1 ? "row" : "rows"
+          }.\n\nNote: They won’t be permanently deleted until you click “Save”.`}
+          confirmText="Remove"
+          cancelText="Cancel"
+          onConfirm={confirmDelete}
+          onCancel={() => setConfirmOpen(false)}
+        />
       </div>
     </div>
   );
@@ -413,15 +513,13 @@ function Cell({ value, col, onChange, onBlur }) {
       }}
       onBlur={onBlur}
       placeholder={
-        col.type === "datetime" ? "mm/dd/yy hh:mm am/pm" :
-        col.type === "date" ? "mm/dd/yy" : ""
+        col.type === "datetime" ? "mm/dd/yy hh:mm am/pm" : col.type === "date" ? "mm/dd/yy" : ""
       }
     />
   );
 }
 
 /** 顯示用格式化（ISO -> UI） */
-// 只在 value 已是 ISO 才轉成 UI 友善格式；否則保持原樣（讓使用者能完整輸入）
 function formatForDisplay(val, col) {
   if (!val) return "";
   if (col.type === "date") {
@@ -435,17 +533,11 @@ function formatForDisplay(val, col) {
   return String(val);
 }
 
-
 /** 匯入用：把 Excel cell 轉成儲存格式（日期/時間 -> ISO；其它轉字串） */
 function normalizeCellForImport(cell, col) {
   if (cell == null) return "";
   const s = String(cell).trim();
-
-  if (col.type === "date") {
-    return normalizeDateInput(s, false) || "";
-  }
-  if (col.type === "datetime") {
-    return normalizeDateInput(s, true) || "";
-  }
+  if (col.type === "date") return normalizeDateInput(s, false) || "";
+  if (col.type === "datetime") return normalizeDateInput(s, true) || "";
   return s;
 }
