@@ -6,6 +6,8 @@ import PortPilotLoginPage from "./pages/PortPilotLoginPage";
 import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import MyContainers from "./pages/MyContainers";
+import Drayage from "./pages/Drayage";
+import Warehouse from "./pages/Warehouse";
 
 export default function App() {
   return (
@@ -14,8 +16,21 @@ export default function App() {
         {/* 預設導向登入頁 */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<PortPilotLoginPage />} />
+        
 
         {/* 受保護的路由：必須登入才可進入 */}
+        <Route path="/drayage" element={
+          <ProtectedRoute>
+            <Drayage />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/warehouse" element={
+          <ProtectedRoute>
+            <Warehouse />
+          </ProtectedRoute>
+        } />
+        
         <Route
           path="/dashboard"
           element={
@@ -24,7 +39,6 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/my-containers"
           element={
