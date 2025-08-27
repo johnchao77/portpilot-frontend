@@ -1,6 +1,6 @@
 // src/pages/PortPilotLoginPage.jsx
-// 說明：保留舊 UI 與狀態命名，合併新邏輯（寫入 pp_auth 並導向 /dashboard）。
-// 注意：所有顯示給使用者的訊息一律英文；中文只用在註解。
+// 說明：保留舊 UI 與狀態命名，整合新邏輯：成功登入時同時寫入 pp_auth 與 pp_user，然後導向 /dashboard。
+// 顯示給使用者的訊息一律英文；中文僅作為註解。
 
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,7 +15,7 @@ export default function Login() {
   const [okMsg, setOkMsg] = useState("");
 
   const navigate = useNavigate();
-  const recaptchaRef = useRef(null); // 用來在失敗時 reset
+  const recaptchaRef = useRef(null); // 失敗時 reset
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -53,7 +53,7 @@ export default function Login() {
 
       const data = await res.json().catch(() => ({}));
 
-      // --- 失敗情況：維持英文訊息並重置 reCAPTCHA ---
+      // --- 失敗：維持英文訊息並重置 reCAPTCHA ---
       if (!res.ok || !data.ok) {
         if (res.status === 401) {
           setErrorMsg("Invalid email or password.");
@@ -63,25 +63,34 @@ export default function Login() {
           setErrorMsg("Access forbidden. Please contact the administrator.");
         } else {
           setErrorMsg(
-            data.error || data.message || "Sign-in failed. Please check your credentials and verification."
+            data.error ||
+              data.message ||
+              "Sign-in failed. Please check your credentials and verification."
           );
         }
-        // 失敗時重置 reCAPTCHA，避免舊 token
         if (recaptchaRef.current) recaptchaRef.current.reset();
         setRecaptchaToken(null);
         return;
       }
 
-      // --- 成功：寫入登入狀態（給 ProtectedRoute 用） ---
-      const token = data.token || "unknown-token";
+      // --- 成功：寫入登入狀態 ---
+      // 1) ProtectedRoute 會看的簡單旗標/token
+      const token = data.token || "ok";
       localStorage.setItem(
         "pp_auth",
-        JSON.stringify({ ok: true, token, user: { email } })
+        JSON.stringify({ ok: true, token })
       );
 
-      setOkMsg("Signed in successfully (reCAPTCHA validated). Redirecting...");
-      // 導向 Dashboard（可保留原本的延遲）
-      setTimeout(() => navigate("/dashboard", { replace: true }), 800);
+      // 2) 之後各頁可讀取目前使用者資訊（email/role/name）
+      const user = {
+        email: data.user?.email || email,
+        role: data.user?.role || "user",
+        name: data.user?.name || "",
+      };
+      localStorage.setItem("pp_user", JSON.stringify(user));
+
+      setOkMsg("Signed in successfully. Redirecting...");
+      setTimeout(() => navigate("/dashboard", { replace: true }), 600);
     } catch (err) {
       console.error(err);
       setErrorMsg("Unable to reach the server. Please try again later.");
@@ -95,7 +104,7 @@ export default function Login() {
   return (
     <div className="flex h-screen items-center justify-center bg-gray-100">
       <div className="w-[282px] rounded-2xl bg-white px-6 py-4 shadow-lg">
-        {/* Logo + Title Combined */}
+        {/* Logo + Title */}
         <div className="mb-1 flex flex-col items-center space-y-1">
           <img src="/logo-triangle.png" alt="PortPilot Logo" className="h-16 w-16" />
           <h1 className="text-blue-600 text-lg font-bold">PortPilot</h1>
@@ -138,7 +147,7 @@ export default function Login() {
             </div>
           </div>
 
-          {/* reCAPTCHA (compact + slight scale) */}
+          {/* reCAPTCHA */}
           <div className="flex justify-center">
             <div className="transform scale-[0.92] origin-top">
               <ReCAPTCHA
@@ -151,7 +160,7 @@ export default function Login() {
             </div>
           </div>
 
-          {/* messages */}
+          {/* Messages */}
           {errorMsg && (
             <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-2 py-1">
               {errorMsg}

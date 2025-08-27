@@ -8,6 +8,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import MyContainers from "./pages/MyContainers";
 import Drayage from "./pages/Drayage";
 import Warehouse from "./pages/Warehouse";
+import UsersPage from "./pages/Users";
 
 export default function App() {
   return (
@@ -44,6 +45,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <MyContainers />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users" 
+          element={
+            <ProtectedRoute>
+              <UsersPage />
             </ProtectedRoute>
           }
         />

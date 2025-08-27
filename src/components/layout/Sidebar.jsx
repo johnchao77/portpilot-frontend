@@ -17,6 +17,7 @@ export default function Sidebar({ open, onClose }) {
           <Item to="/warehouse" label="Warehouse" />
           <Item to="/my-containers" label="MyContainers" />
           <Item to="/reports" label="Reports" />
+          <Item to="/users" label="Users" />
         </nav>
       </aside>
 
