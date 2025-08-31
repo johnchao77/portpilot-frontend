@@ -73,24 +73,23 @@ export default function Login() {
         return;
       }
 
-      // --- 成功：寫入登入狀態 ---
-      // 1) ProtectedRoute 會看的簡單旗標/token
+     // --- 成功：寫入登入狀態（把 user 放進 pp_auth，並保留 pp_user 相容） ---
       const token = data.token || "ok";
-      localStorage.setItem(
-        "pp_auth",
-        JSON.stringify({ ok: true, token })
-      );
-
-      // 2) 之後各頁可讀取目前使用者資訊（email/role/name）
       const user = {
         email: data.user?.email || email,
-        role: data.user?.role || "user",
-        name: data.user?.name || "",
+        role:  data.user?.role  || "user",
+        name:  data.user?.name  || "",
       };
+
+      // ProtectedRoute / AdminRoute 可從 pp_auth.user.role 取得角色
+      localStorage.setItem("pp_auth", JSON.stringify({ ok: true, token, user }));
+
+      // 舊程式若讀取 pp_user，這裡也同步一份（可日後移除）
       localStorage.setItem("pp_user", JSON.stringify(user));
 
       setOkMsg("Signed in successfully. Redirecting...");
       setTimeout(() => navigate("/dashboard", { replace: true }), 600);
+
     } catch (err) {
       console.error(err);
       setErrorMsg("Unable to reach the server. Please try again later.");

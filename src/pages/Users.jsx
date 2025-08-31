@@ -1,21 +1,20 @@
 // src/pages/Users.jsx
 import React, { useEffect, useState } from "react";
-import ConfirmModal from "../components/ConfirmModal";
 
 const API_BASE = process.env.REACT_APP_API_URL || "https://api.portpilot.co";
 const ROLES = ["Admin", "Dispatcher", "Drayage", "Warehouse"];
 
-// 讀目前登入者（由 PortPilotLoginPage 寫入的 pp_user）
 function getCurrentUser() {
   try {
-    const u = JSON.parse(localStorage.getItem("pp_user") || "null");
-    return u && u.email ? u : null;
+    const a = JSON.parse(localStorage.getItem("pp_user") || "null");
+    if (a && a.email) return a;
+    const b = JSON.parse(localStorage.getItem("user") || "null");
+    return b || null;
   } catch {
     return null;
   }
 }
 
-// 單純產生前端使用的列 key（不送後端）
 const genId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -29,25 +28,23 @@ export default function UsersPage() {
   const [selected, setSelected] = useState(new Set());
   const [myNewPw, setMyNewPw] = useState("");
 
-  // 刪除確認 Modal
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  // option lists for Company Code
+  const [drayageCodes, setDrayageCodes] = useState([]);
+  const [whseCodes, setWhseCodes] = useState([]);
 
-  // 供後端判斷的簡單 header（你後端 app.py 會讀這兩個）
-  const authHeaders = me
+  const hdrs = me
     ? { "X-User-Email": me.email, "X-User-Role": me.role || "" }
     : {};
 
-  // 初次載入
+  // load users
   useEffect(() => {
-    if (!me) return;
     (async () => {
       setLoading(true);
       setErr("");
       try {
-        const r = await fetch(`${API_BASE}/users`, { headers: authHeaders });
+        const r = await fetch(`${API_BASE}/users`, { headers: hdrs });
         const j = await r.json();
-        if (!r.ok || !j.ok) throw new Error(j.error || "Load failed");
-        // Admin 可能多筆，非 Admin 只會回自己一筆；密碼欄位一律清空
+        if (!r.ok || !j.ok) throw new Error(j.error || "load failed");
         setRows((j.rows || []).map((x) => ({ _id: genId(), ...x, password: "" })));
       } catch (e) {
         console.error(e);
@@ -57,13 +54,42 @@ export default function UsersPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); //（固定初次載入即可）
+  }, []);
 
-  if (!me) return <div className="p-4">Not signed in.</div>;
+  // load dropdown sources (drayage/warehouse codes)
+  useEffect(() => {
+    (async () => {
+      try {
+        const [r1, r2] = await Promise.all([
+          fetch(`${API_BASE}/drayage`),
+          fetch(`${API_BASE}/warehouse`),
+        ]);
+        const j1 = await r1.json().catch(() => ({}));
+        const j2 = await r2.json().catch(() => ({}));
+        setDrayageCodes(
+          (j1.rows || [])
+            .map((x) => (x.code || "").trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b))
+        );
+        setWhseCodes(
+          (j2.rows || [])
+            .map((x) => (x.whse_code || "").trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b))
+        );
+      } catch (e) {
+        // 靜默失敗：頁面仍可輸入文字
+        console.warn("load dropdown sources failed", e);
+      }
+    })();
+  }, []);
 
-  // ───────── Admin 專用：新增、刪除、儲存 ─────────
+  if (!me) {
+    return <div className="p-4">Not signed in.</div>;
+  }
+
   const onAdd = () => {
-    if (!isAdmin) return;
     setRows((r) => [
       {
         _id: genId(),
@@ -79,23 +105,24 @@ export default function UsersPage() {
     ]);
   };
 
-  const onToggleSel = (id, checked) => {
+  const onToggleSel = (id, v) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      checked ? next.add(id) : next.delete(id);
+      v ? next.add(id) : next.delete(id);
       return next;
     });
   };
 
-  const askDelete = () => {
-    if (!isAdmin || selected.size === 0) return;
-    setDeleteOpen(true);
-  };
-
-  const confirmDelete = () => {
+  const onDelete = () => {
+    if (selected.size === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${selected.size} selected row(s)? (changes apply after Save)`
+      )
+    )
+      return;
     setRows((prev) => prev.filter((r) => !selected.has(r._id)));
     setSelected(new Set());
-    setDeleteOpen(false);
   };
 
   const onChange = (idx, key, val) => {
@@ -106,19 +133,46 @@ export default function UsersPage() {
     });
   };
 
-  // 儲存前驗證（Admin 批次）
+  // when Role changes, keep company_code consistent with the right list
+  const onRoleChange = (idx, newRole) => {
+    setRows((r) => {
+      const copy = [...r];
+      const cur = { ...copy[idx], role: newRole };
+      const code = (cur.company_code || "").trim();
+      if (newRole === "Drayage" && !drayageCodes.includes(code)) cur.company_code = "";
+      else if (newRole === "Warehouse" && !whseCodes.includes(code))
+        cur.company_code = "";
+      copy[idx] = cur;
+      return copy;
+    });
+  };
+
   const validate = () => {
     if (!isAdmin) return true;
-    const seen = new Set();
+    const emails = new Set();
     for (const r of rows) {
       const email = (r.email || "").trim().toLowerCase();
       const role = (r.role || "").trim();
       if (!email) return "Email is required.";
+      if (emails.has(email)) return `Duplicate email: ${email}`;
       if (!ROLES.includes(role)) return `Invalid role for ${email}`;
-      if (seen.has(email)) return `Duplicate email: ${email}`;
-      seen.add(email);
+
+      // new: when Drayage/Warehouse, company_code must come from their list
+      const code = (r.company_code || "").trim();
+      if (role === "Drayage") {
+        if (!code) return `Company Code is required for ${email} (Drayage).`;
+        if (!drayageCodes.includes(code))
+          return `Company Code must be a valid Drayage Code for ${email}.`;
+      }
+      if (role === "Warehouse") {
+        if (!code) return `Company Code is required for ${email} (Warehouse).`;
+        if (!whseCodes.includes(code))
+          return `Company Code must be a valid WHSE Code for ${email}.`;
+      }
+      emails.add(email);
     }
     return true;
+    // you can relax the validation if you prefer to allow free text and let the backend reject
   };
 
   const onSave = async () => {
@@ -131,28 +185,26 @@ export default function UsersPage() {
     setLoading(true);
     setErr("");
     try {
-      // 只把需要的欄位送回去；password 若為空字串後端會忽略（不改密碼）
       const payload = {
         rows: rows.map((r) => ({
           email: (r.email || "").trim().toLowerCase(),
-          password: (r.password || "").trim(),
+          password: (r.password || "").trim(), // blank => keep
           name: r.name || "",
           company: r.company || "",
-          company_code: r.company_code || "",
+          company_code: (r.company_code || "").trim(),
           role: r.role || "",
           remark: r.remark || "",
         })),
       };
       const r = await fetch(`${API_BASE}/users`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...hdrs },
         body: JSON.stringify(payload),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) throw new Error(j.error || "Save failed");
-
-      // 重新拉一次，把密碼欄清空
-      const r2 = await fetch(`${API_BASE}/users`, { headers: authHeaders });
+      if (!r.ok || !j.ok) throw new Error(j.error || "save failed");
+      // reload (and clear password inputs)
+      const r2 = await fetch(`${API_BASE}/users`, { headers: hdrs });
       const j2 = await r2.json();
       setRows((j2.rows || []).map((x) => ({ _id: genId(), ...x, password: "" })));
     } catch (e) {
@@ -163,7 +215,6 @@ export default function UsersPage() {
     }
   };
 
-  // ───────── 非 Admin：改自己的密碼 ─────────
   const changeMyPassword = async () => {
     if (myNewPw.trim().length < 4) {
       setErr("Password too short.");
@@ -174,11 +225,11 @@ export default function UsersPage() {
     try {
       const r = await fetch(`${API_BASE}/users/me`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...hdrs },
         body: JSON.stringify({ password: myNewPw.trim() }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) throw new Error(j.error || "Change password failed");
+      if (!r.ok || !j.ok) throw new Error(j.error || "change password failed");
       setMyNewPw("");
       alert("Password changed.");
     } catch (e) {
@@ -189,7 +240,7 @@ export default function UsersPage() {
     }
   };
 
-  // =============== Admin 介面（表格） ===============
+  // ---------- Admin UI ----------
   if (isAdmin) {
     return (
       <div className="p-4">
@@ -206,13 +257,13 @@ export default function UsersPage() {
             {loading ? "Saving..." : "Save"}
           </button>
           <button
-            onClick={askDelete}
-            disabled={selected.size === 0}
             className={
-              selected.size === 0
-                ? "px-3 py-1 rounded bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "px-3 py-1 rounded bg-red-600 text-white"
+              selected.size
+                ? "px-3 py-1 rounded bg-red-600 text-white"
+                : "px-3 py-1 rounded bg-gray-200 text-gray-500 cursor-not-allowed"
             }
+            disabled={!selected.size}
+            onClick={onDelete}
           >
             Delete
           </button>
@@ -224,12 +275,13 @@ export default function UsersPage() {
             <thead>
               <tr className="bg-white sticky top-0">
                 <th className="px-2 py-2" style={{ width: 36 }}></th>
+                {/* Role moved to the first column */}
+                <th className="px-2 py-2 text-left">Role*</th>
                 <th className="px-2 py-2 text-left">Email*</th>
                 <th className="px-2 py-2 text-left">Password (set to change)</th>
                 <th className="px-2 py-2 text-left">Name</th>
                 <th className="px-2 py-2 text-left">Company</th>
                 <th className="px-2 py-2 text-left">Company Code</th>
-                <th className="px-2 py-2 text-left">Role*</th>
                 <th className="px-2 py-2 text-left">Remark</th>
               </tr>
             </thead>
@@ -250,6 +302,22 @@ export default function UsersPage() {
                         onChange={(e) => onToggleSel(r._id, e.target.checked)}
                       />
                     </td>
+
+                    {/* Role first */}
+                    <td className="px-2 py-1">
+                      <select
+                        className="w-full border rounded px-2 py-1 text-sm"
+                        value={r.role || ""}
+                        onChange={(e) => onRoleChange(i, e.target.value)}
+                      >
+                        {ROLES.map((x) => (
+                          <option key={x} value={x}>
+                            {x}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
                     <td className="px-2 py-1">
                       <input
                         className="w-full border rounded px-2 py-1 text-sm"
@@ -258,6 +326,7 @@ export default function UsersPage() {
                         placeholder="user@example.com"
                       />
                     </td>
+
                     <td className="px-2 py-1">
                       <input
                         className="w-full border rounded px-2 py-1 text-sm"
@@ -267,6 +336,7 @@ export default function UsersPage() {
                         placeholder="(leave blank to keep)"
                       />
                     </td>
+
                     <td className="px-2 py-1">
                       <input
                         className="w-full border rounded px-2 py-1 text-sm"
@@ -274,6 +344,7 @@ export default function UsersPage() {
                         onChange={(e) => onChange(i, "name", e.target.value)}
                       />
                     </td>
+
                     <td className="px-2 py-1">
                       <input
                         className="w-full border rounded px-2 py-1 text-sm"
@@ -281,26 +352,45 @@ export default function UsersPage() {
                         onChange={(e) => onChange(i, "company", e.target.value)}
                       />
                     </td>
+
+                    {/* Company Code: dropdown for Drayage/Warehouse */}
                     <td className="px-2 py-1">
-                      <input
-                        className="w-full border rounded px-2 py-1 text-sm"
-                        value={r.company_code || ""}
-                        onChange={(e) => onChange(i, "company_code", e.target.value)}
-                      />
+                      {r.role === "Drayage" ? (
+                        <select
+                          className="w-full border rounded px-2 py-1 text-sm"
+                          value={r.company_code || ""}
+                          onChange={(e) => onChange(i, "company_code", e.target.value)}
+                        >
+                          <option value="">-- Select Drayage Code --</option>
+                          {drayageCodes.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      ) : r.role === "Warehouse" ? (
+                        <select
+                          className="w-full border rounded px-2 py-1 text-sm"
+                          value={r.company_code || ""}
+                          onChange={(e) => onChange(i, "company_code", e.target.value)}
+                        >
+                          <option value="">-- Select WHSE Code --</option>
+                          {whseCodes.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="w-full border rounded px-2 py-1 text-sm"
+                          value={r.company_code || ""}
+                          onChange={(e) => onChange(i, "company_code", e.target.value)}
+                          placeholder="Company Code"
+                        />
+                      )}
                     </td>
-                    <td className="px-2 py-1">
-                      <select
-                        className="w-full border rounded px-2 py-1 text-sm"
-                        value={r.role || ""}
-                        onChange={(e) => onChange(i, "role", e.target.value)}
-                      >
-                        {ROLES.map((x) => (
-                          <option key={x} value={x}>
-                            {x}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+
                     <td className="px-2 py-1">
                       <input
                         className="w-full border rounded px-2 py-1 text-sm"
@@ -314,24 +404,11 @@ export default function UsersPage() {
             </tbody>
           </table>
         </div>
-
-        {/* 刪除確認 Modal */}
-        <ConfirmModal
-          open={deleteOpen}
-          title="Remove selected users"
-          message={`You’re about to remove ${selected.size} selected ${
-            selected.size === 1 ? "row" : "rows"
-          }.\n\nNote: They won’t be permanently deleted until you click “Save”.`}
-          confirmText="Remove"
-          cancelText="Cancel"
-          onConfirm={confirmDelete}
-          onCancel={() => setDeleteOpen(false)}
-        />
       </div>
     );
   }
 
-  // =============== 非 Admin 介面（僅看自己的資料 + 改密碼） ===============
+  // ---------- Non-admin: read-only + change password ----------
   const mine = rows[0] || {};
   return (
     <div className="p-4">

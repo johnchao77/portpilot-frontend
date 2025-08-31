@@ -8,7 +8,9 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import MyContainers from "./pages/MyContainers";
 import Drayage from "./pages/Drayage";
 import Warehouse from "./pages/Warehouse";
-import UsersPage from "./pages/Users";
+import Users from "./pages/Users";
+import AdminHome from "./pages/AdminHome";
+import AdminRoute from "./components/AdminRoute";
 
 export default function App() {
   return (
@@ -52,10 +54,49 @@ export default function App() {
           path="/users" 
           element={
             <ProtectedRoute>
-              <UsersPage />
+              <Users />
             </ProtectedRoute>
           }
         />
+
+      {/* Admin 區（只有 Admin 可進） */}
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <AdminHome />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <AdminRoute>
+              <Users />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/drayage"
+          element={
+            <AdminRoute>
+              <Drayage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/warehouse"
+          element={
+            <AdminRoute>
+              <Warehouse />
+            </AdminRoute>
+          }
+        />
+
+        {/* 舊路徑 → 新路徑（相容性重導） */}
+        <Route path="/users" element={<Navigate to="/admin/users" replace />} />
+        <Route path="/drayage" element={<Navigate to="/admin/drayage" replace />} />
+        <Route path="/warehouse" element={<Navigate to="/admin/warehouse" replace />} />
 
         {/* 未匹配到的路徑，統一回登入頁 */}
         <Route path="*" element={<Navigate to="/login" replace />} />
