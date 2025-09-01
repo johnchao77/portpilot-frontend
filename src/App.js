@@ -1,106 +1,135 @@
 // src/App.js
-// 說明：集中設定網站路由；/dashboard 走 ProtectedRoute；/ 直接導到 /login
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useNavigate } from "react-router-dom";
+
 import PortPilotLoginPage from "./pages/PortPilotLoginPage";
-import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
+import AdminRoute from "./components/AdminRoute";
+
+import Sidebar from "./components/layout/Sidebar";
+import UserMenu from "./components/layout/UserMenu";
+
+import Dashboard from "./pages/Dashboard";
 import MyContainers from "./pages/MyContainers";
 import Drayage from "./pages/Drayage";
 import Warehouse from "./pages/Warehouse";
 import Users from "./pages/Users";
 import AdminHome from "./pages/AdminHome";
-import AdminRoute from "./components/AdminRoute";
+
+// 唯一的版型：左邊 Sidebar，右上角二 Logout, 右上角一 UserMenu，內容用 <Outlet />
+function AppShell() {
+  const navigate = useNavigate();
+
+  const handleLogout = React.useCallback(() => {
+    try {
+      localStorage.removeItem("pp_auth");
+      localStorage.removeItem("pp_user");
+    } finally {
+      navigate("/login", { replace: true });
+    }
+  }, [navigate]);
+
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar />
+
+      <main className="flex-1 flex flex-col">
+        {/* 頂欄：右側放登出 icon + Avatar */}
+        {/* 右上頂欄：sticky + z-30，避免被內容覆蓋 */}
+        <div className="sticky top-0 z-30 h-12 border-b bg-white flex items-center justify-end px-4 gap-2">
+          {/* Logout icon button */}
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Logout"
+            aria-label="Logout"
+            data-pp-logout
+            className="h-9 w-9 grid place-items-center rounded-md border text-gray-600 hover:bg-gray-50"
+          >
+            {/* inline SVG：登出圖示（無需外部套件） */}
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <path d="M16 17l5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+          </button>
+
+          {/* 右邊 Avatar / 個人選單 */}
+          <UserMenu />
+        </div>
+
+        {/* 內頁內容 */}
+        <div className="flex-1 overflow-auto p-3">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  );
+}
+
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 預設導向登入頁 */}
+        {/* 預設導向登入 */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<PortPilotLoginPage />} />
-        
 
-        {/* 受保護的路由：必須登入才可進入 */}
-        <Route path="/drayage" element={
-          <ProtectedRoute>
-            <Drayage />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/warehouse" element={
-          <ProtectedRoute>
-            <Warehouse />
-          </ProtectedRoute>
-        } />
-        
+        {/* 所有登入後頁面都用同一個 AppShell（=> Sidebar 只渲染一次） */}
         <Route
-          path="/dashboard"
           element={
             <ProtectedRoute>
-              <Dashboard />
+              <AppShell />
             </ProtectedRoute>
           }
-        />
-        <Route
-          path="/my-containers"
-          element={
-            <ProtectedRoute>
-              <MyContainers />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/users" 
-          element={
-            <ProtectedRoute>
-              <Users />
-            </ProtectedRoute>
-          }
-        />
+        >
+          {/* 一般頁面 */}
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/my-containers" element={<MyContainers />} />
 
-      {/* Admin 區（只有 Admin 可進） */}
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute>
-              <AdminHome />
-            </AdminRoute>
-          }
-        />
-        <Route
-          path="/admin/users"
-          element={
-            <AdminRoute>
-              <Users />
-            </AdminRoute>
-          }
-        />
-        <Route
-          path="/admin/drayage"
-          element={
-            <AdminRoute>
-              <Drayage />
-            </AdminRoute>
-          }
-        />
-        <Route
-          path="/admin/warehouse"
-          element={
-            <AdminRoute>
-              <Warehouse />
-            </AdminRoute>
-          }
-        />
+          {/* Admin 區（權限再套 AdminRoute） */}
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminHome />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <AdminRoute>
+                <Users />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/drayage"
+            element={
+              <AdminRoute>
+                <Drayage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/warehouse"
+            element={
+              <AdminRoute>
+                <Warehouse />
+              </AdminRoute>
+            }
+          />
 
-        {/* 舊路徑 → 新路徑（相容性重導） */}
-        <Route path="/users" element={<Navigate to="/admin/users" replace />} />
-        <Route path="/drayage" element={<Navigate to="/admin/drayage" replace />} />
-        <Route path="/warehouse" element={<Navigate to="/admin/warehouse" replace />} />
+          {/* 舊路徑相容性轉向（可留可拿掉） */}
+          <Route path="/users" element={<Navigate to="/admin/users" replace />} />
+          <Route path="/drayage" element={<Navigate to="/admin/drayage" replace />} />
+          <Route path="/warehouse" element={<Navigate to="/admin/warehouse" replace />} />
+        </Route>
 
-        {/* 未匹配到的路徑，統一回登入頁 */}
+        {/* 其它不匹配的路徑一律回登入 */}
         <Route path="*" element={<Navigate to="/login" replace />} />
-
       </Routes>
     </BrowserRouter>
   );

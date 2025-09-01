@@ -79,6 +79,9 @@ export default function Login() {
         email: data.user?.email || email,
         role:  data.user?.role  || "user",
         name:  data.user?.name  || "",
+        company:       data.user?.company || "",
+        company_code:  data.user?.company_code || "",
+        remark:        data.user?.remark || "",
       };
 
       // ProtectedRoute / AdminRoute 可從 pp_auth.user.role 取得角色
