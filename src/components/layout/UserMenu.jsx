@@ -1,13 +1,16 @@
 // src/components/layout/UserMenu.jsx
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getCurrentUser, isSignedIn } from "../../utils/auth";
 
 const API_BASE = process.env.REACT_APP_API_URL || "https://api.portpilot.co";
 
+/** 依你的規則產生兩碼縮寫（支援數字/符號分隔） */
 function makeInitials(name, email) {
   const local = (email || "").split("@")[0] || "";
   const source = (name || "").trim() || local || "user";
   const tokens = source.split(/[^A-Za-z0-9]+/).filter(Boolean);
+
   let a = "", b = "";
   if (tokens.length >= 2) {
     a = tokens[0][0];
@@ -16,7 +19,9 @@ function makeInitials(name, email) {
     const t = tokens[0] || "";
     if (t) {
       a = t[0];
-      for (let i = 1; i < t.length; i++) if (/[A-Za-z0-9]/.test(t[i])) { b = t[i]; break; }
+      for (let i = 1; i < t.length; i++) {
+        if (/[A-Za-z0-9]/.test(t[i])) { b = t[i]; break; }
+      }
     }
     if (!b) {
       const fallback = (local.replace(/[^A-Za-z0-9]/g, "") || "US");
@@ -26,9 +31,19 @@ function makeInitials(name, email) {
   return (String(a) + String(b)).toUpperCase();
 }
 
+function LabelValue({ label, value }) {
+  return (
+    <div className="col-span-1">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-sm">{value || <span className="text-gray-400">—</span>}</div>
+    </div>
+  );
+}
+
 export default function UserMenu() {
-  // ✅ 所有 Hooks 一律放在函式最上面
+  // Hooks 一律在最上面
   const me = getCurrentUser();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,14 +53,16 @@ export default function UserMenu() {
 
   const initials = makeInitials(me?.name, me?.email);
 
+  // 點外部區域或按 Esc 關閉彈層
   useEffect(() => {
-    const onDoc = (e) => {
+    function onDoc(e) {
       if (!open) return;
       if (panelRef.current && !panelRef.current.contains(e.target)) {
         setOpen(false);
       }
-    };
-    const onKey = (e) => open && e.key === "Escape" && setOpen(false);
+    }
+    function onKey(e) { if (open && e.key === "Escape") setOpen(false); }
+
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -54,14 +71,18 @@ export default function UserMenu() {
     };
   }, [open]);
 
-  // ✅ Hooks 之後再做條件 return
   if (!isSignedIn() || !me) return null;
 
+  // 登出：清掉本地登入狀態並回登入頁
+  function handleLogout() {
+    localStorage.removeItem("pp_auth");
+    localStorage.removeItem("pp_user");
+    navigate("/login", { replace: true });
+  }
+
+  // 變更密碼
   async function changePassword() {
-    if (!pw.trim()) {
-      setErr("Password is required.");
-      return;
-    }
+    if (!pw.trim()) { setErr("Password is required."); return; }
     setBusy(true);
     setErr("");
     try {
@@ -88,7 +109,9 @@ export default function UserMenu() {
   }
 
   return (
+    // 外層不再帶 padding/border，方便放在 Sidebar 底部直向容器裡
     <div className="relative" data-pp-user-menu-root>
+      {/* Avatar 按鈕（唯一觸發面板的按鈕） */}
       <button
         type="button"
         data-pp-user-menu
@@ -101,11 +124,12 @@ export default function UserMenu() {
         {initials}
       </button>
 
+      {/* 面板：自 Sidebar 底部向上展開，避免被底緣擋住 */}
       {open && (
         <div
           ref={panelRef}
           role="menu"
-          className="absolute right-0 mt-2 w-80 rounded-xl border bg-white shadow-lg p-4 z-50"
+          className="absolute left-1/2 -translate-x-1/2 bottom-12 w-80 rounded-xl border bg-white shadow-lg p-4 z-50"
         >
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-teal-500 text-white grid place-items-center font-bold">
@@ -127,7 +151,6 @@ export default function UserMenu() {
           <div className="mt-4">
             <div className="text-sm font-medium mb-1">Change Password</div>
 
-            {/* 密碼輸入（可顯示／隱藏） */}
             <div className="relative">
               <input
                 type={showPw ? "text" : "password"}
@@ -138,7 +161,7 @@ export default function UserMenu() {
               />
               <button
                 type="button"
-                onClick={() => setShowPw((v) => !v)}
+                onClick={() => setShowPw(v => !v)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-blue-600 hover:underline"
                 aria-label={showPw ? "Hide password" : "Show password"}
               >
@@ -159,18 +182,8 @@ export default function UserMenu() {
               </button>
             </div>
           </div>
-
         </div>
       )}
-    </div>
-  );
-}
-
-function LabelValue({ label, value }) {
-  return (
-    <div className="col-span-1">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-sm">{value || <span className="text-gray-400">—</span>}</div>
     </div>
   );
 }
