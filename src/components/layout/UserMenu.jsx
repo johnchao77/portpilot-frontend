@@ -1,6 +1,5 @@
 // src/components/layout/UserMenu.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { getCurrentUser, isSignedIn } from "../../utils/auth";
 
 const API_BASE = process.env.REACT_APP_API_URL || "https://api.portpilot.co";
@@ -43,7 +42,6 @@ function LabelValue({ label, value }) {
 export default function UserMenu() {
   // Hooks 一律在最上面
   const me = getCurrentUser();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,16 +51,13 @@ export default function UserMenu() {
 
   const initials = makeInitials(me?.name, me?.email);
 
-  // 點外部區域或按 Esc 關閉彈層
+  // 點外部或 Esc 關閉
   useEffect(() => {
     function onDoc(e) {
       if (!open) return;
-      if (panelRef.current && !panelRef.current.contains(e.target)) {
-        setOpen(false);
-      }
+      if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false);
     }
     function onKey(e) { if (open && e.key === "Escape") setOpen(false); }
-
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -73,14 +68,6 @@ export default function UserMenu() {
 
   if (!isSignedIn() || !me) return null;
 
-  // 登出：清掉本地登入狀態並回登入頁
-  function handleLogout() {
-    localStorage.removeItem("pp_auth");
-    localStorage.removeItem("pp_user");
-    navigate("/login", { replace: true });
-  }
-
-  // 變更密碼
   async function changePassword() {
     if (!pw.trim()) { setErr("Password is required."); return; }
     setBusy(true);
@@ -109,9 +96,8 @@ export default function UserMenu() {
   }
 
   return (
-    // 外層不再帶 padding/border，方便放在 Sidebar 底部直向容器裡
     <div className="relative" data-pp-user-menu-root>
-      {/* Avatar 按鈕（唯一觸發面板的按鈕） */}
+      {/* Avatar 按鈕 */}
       <button
         type="button"
         data-pp-user-menu
@@ -124,12 +110,12 @@ export default function UserMenu() {
         {initials}
       </button>
 
-      {/* 面板：自 Sidebar 底部向上展開，避免被底緣擋住 */}
+      {/* 面板：提高 z-index，並從側欄底部往上開 */}
       {open && (
         <div
           ref={panelRef}
           role="menu"
-          className="absolute left-1/2 -translate-x-1/2 bottom-12 w-80 rounded-xl border bg-white shadow-lg p-4 z-50"
+          className="absolute left-1/4 -translate-x-1 bottom-12 w-80 rounded-xl border bg-white shadow-lg p-4 z-[400]"
         >
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-teal-500 text-white grid place-items-center font-bold">
@@ -150,7 +136,6 @@ export default function UserMenu() {
 
           <div className="mt-4">
             <div className="text-sm font-medium mb-1">Change Password</div>
-
             <div className="relative">
               <input
                 type={showPw ? "text" : "password"}
@@ -187,3 +172,4 @@ export default function UserMenu() {
     </div>
   );
 }
+

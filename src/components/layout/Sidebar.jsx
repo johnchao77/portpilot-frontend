@@ -1,32 +1,41 @@
 // src/components/layout/Sidebar.jsx
-import React from "react";
+import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { getCurrentUser, isAdmin } from "../../utils/auth.js";
+import { isAdmin } from "../../utils/auth.js"; // 移除未使用的 getCurrentUser
 import UserMenu from "./UserMenu";
 
-export default function Sidebar({ collapsed = false, onToggle }) {
-  const me = getCurrentUser();
+export default function Sidebar(props) {
+  const { collapsed: collapsedProp, onToggle: onToggleProp } = props;
+
+  // 若父層沒有控制，改用內部 state；有傳入就使用父層的值
+  const [collapsedLocal, setCollapsedLocal] = useState(false);
+  const controlled = typeof collapsedProp === "boolean" && typeof onToggleProp === "function";
+  const collapsed = controlled ? collapsedProp : collapsedLocal;
+  const onToggle = controlled ? onToggleProp : () => setCollapsedLocal(v => !v);
+
   const admin = isAdmin();
   const navigate = useNavigate();
 
-  const widthCls  = collapsed ? "w-16" : "w-40"; // 原 w-56 → 70% 寬；摺疊更窄
-  const labelVis  = collapsed ? "hidden" : "inline";
-  const itemBase  = "block rounded px-3 py-2 text-sm " + (collapsed ? "text-center" : "");
-  const itemCls   = ({ isActive }) =>
-    itemBase +
-    (isActive
-      ? " bg-blue-50 text-blue-700 font-semibold"
-      : " text-gray-700 hover:bg-gray-100");
+  // 原 w-56 → w-40（約70%）；摺疊時 w-16
+  const widthCls = collapsed ? "w-16" : "w-40";
+  const labelVis = collapsed ? "hidden" : "inline"; // 只隱藏文字
+  const itemBase = "block rounded px-3 py-2 text-sm " + (collapsed ? "text-center" : "");
+  const itemCls = ({ isActive }) =>
+    itemBase + (isActive ? " bg-blue-50 text-blue-700 font-semibold" : " text-gray-700 hover:bg-gray-100");
 
   const handleLogout = () => {
-    try { localStorage.removeItem("pp_auth"); localStorage.removeItem("pp_user"); } catch {}
+    try {
+      localStorage.removeItem("pp_auth");
+      localStorage.removeItem("pp_user");
+    } catch {}
     navigate("/login", { replace: true });
   };
 
   return (
-    // h-screen + sticky 讓 Sidebar 固定在視窗；flex-col 讓底部區塊永遠貼底
+    // 這裡修正：className（之前誤寫成 cclassName），並加上 justify-between
     <aside
-      className={`${widthCls} h-screen sticky top-0 shrink-0 border-r bg-white flex flex-col transition-all duration-200`}
+      className={`${widthCls} h-screen sticky top-0 shrink-0 border-r bg-white
+                  flex flex-col justify-between transition-all duration-200 z-[200]`}
     >
       {/* 標題 + 折疊按鈕 */}
       <div className="p-3 flex items-center justify-between">
@@ -51,8 +60,8 @@ export default function Sidebar({ collapsed = false, onToggle }) {
         </button>
       </div>
 
-      {/* 中段導覽（必要時可捲動） */}
-      <nav className="space-y-1 px-2 pb-2 overflow-y-auto">
+      {/* 中段導覽：吃滿剩餘高度並可捲動（min-h-0 讓 overflow 生效） */}
+      <nav className="flex-1 min-h-0 overflow-y-auto space-y-1 px-2 pb-2">
         <NavLink to="/dashboard" className={itemCls} title="Dashboard">
           <span className={labelVis}>Dashboard</span>
         </NavLink>
@@ -82,9 +91,9 @@ export default function Sidebar({ collapsed = false, onToggle }) {
         )}
       </nav>
 
-      {/* ── 底部：直向排列（Logout 在上、Avatar 在下），Sidebar 固定不跟右側捲動 ── */}
-      <div className="mt-auto px-2 pt-2 pb-3 border-t flex flex-col items-center gap-2">
-        {/* 唯一的 Logout 按鈕（請確保整個專案只出現這一顆） */}
+      {/* 底部：會固定貼在最底（因為外層使用 justify-between） */}
+      <div className="px-2 pt-2 pb-3 border-t flex flex-col items-center gap-2">
+        {/* Logout */}
         <button
           type="button"
           onClick={handleLogout}
@@ -99,10 +108,9 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           </svg>
         </button>
 
-        {/* Avatar（UserMenu 按鈕） */}
+        {/* Avatar（使用者選單） */}
         <UserMenu />
       </div>
-
     </aside>
   );
 }

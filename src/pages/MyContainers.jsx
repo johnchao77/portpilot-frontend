@@ -7,6 +7,49 @@ import {
   normalizeDateInput,
 } from "../utils/dataFormatters";
 import ConfirmModal from "../components/ConfirmModal";
+import {getCurrentUser} from "../utils/auth";
+
+// 產生縮寫（沿用你 UserMenu 的規則：取頭尾字母，支援數字/符號分隔）
+function initialsFrom(name, email) {
+  const local = (email || "").split("@")[0] || "";
+  const src = (name || "").trim() || local || "user";
+  const tokens = src.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  let a = "", b = "";
+  if (tokens.length >= 2) {
+    a = tokens[0][0];
+    b = tokens[tokens.length - 1][0];
+  } else {
+    const t = tokens[0] || local || "US";
+    a = t[0] || "U";
+    // 找到 t 內最後一個英數字；沒有就用 local 第二碼
+    const m = t.match(/[A-Za-z0-9](?=[^A-Za-z0-9]*$)/);
+    b = (m && m[0]) || local[1] || local[0] || "S";
+  }
+  return (String(a) + String(b)).toUpperCase();
+}
+
+// 小徽章元件：顯示縮寫 + 角色
+function CurrentUserBadge() {
+  const me = getCurrentUser();
+  if (!me) return null;
+  const initials = initialsFrom(me.name, me.email);
+  const role = String(me.role || "").trim();
+
+  return (
+    <div
+      className="ml-3 flex items-center gap-2 text-xs"
+      title={`${me.name || me.email} • ${role || "—"}`}
+    >
+      <div className="h-6 w-6 rounded-full bg-teal-500 text-white grid place-items-center font-bold">
+        {initials}
+      </div>
+      <span className="px-2 py-0.5 rounded-full border bg-gray-50 text-gray-700">
+        {role || "—"}
+      </span>
+    </div>
+  );
+}
+
 
 const API_BASE = process.env.REACT_APP_API_URL || "https://api.portpilot.co";
 
@@ -32,8 +75,103 @@ const COLUMNS = [
 
 const DATE_FIELDS     = new Set(COLUMNS.filter(c => c.type === "date").map(c => c.key));
 const DATETIME_FIELDS = new Set(COLUMNS.filter(c => c.type === "datetime").map(c => c.key));
-const LABEL_TO_KEY    = Object.fromEntries(COLUMNS.map(c => [c.label, c.key]));
 const WIDTHS_KEY      = "mycontainers.colwidths";
+
+// 欄位 key 對照（必須與你的 COLUMNS 相同）
+const FIELD_KEYS = {
+  order_no: "order_no",
+  status: "status",
+  drayage: "drayage",
+  warehouse: "warehouse",
+  mbl_no: "mbl_no",
+  container: "container",
+  etd: "etd",
+  eta: "eta",
+  pod: "pod",
+  arrived: "arrived",
+  lfd: "lfd",
+  appt_date: "appt_date",
+  lrd: "lrd",
+  delivered_dt: "delivered_dt",
+  emptied_dt: "emptied_dt",
+  returned_date: "returned_date",
+};
+
+// 權限矩陣：'edit' 可編、'read' 唯讀、'auto' 程式自動
+const PERMS = {
+  admin:    (key) => (key === FIELD_KEYS.status ? "auto" : "edit"),
+  dispatcher: (key) => ({
+    [FIELD_KEYS.order_no]: "read",
+    [FIELD_KEYS.status]:   "auto",
+    [FIELD_KEYS.drayage]:  "edit",
+    [FIELD_KEYS.warehouse]:"edit",
+    [FIELD_KEYS.mbl_no]:   "edit",
+    [FIELD_KEYS.container]:"edit",
+    [FIELD_KEYS.etd]:      "edit",
+    [FIELD_KEYS.eta]:      "edit",
+    [FIELD_KEYS.pod]:      "edit",
+    [FIELD_KEYS.arrived]:  "read",
+    [FIELD_KEYS.lfd]:      "read",
+    [FIELD_KEYS.appt_date]:"read",
+    [FIELD_KEYS.lrd]:      "read",
+    [FIELD_KEYS.delivered_dt]:"read",
+    [FIELD_KEYS.emptied_dt]  :"read",
+    [FIELD_KEYS.returned_date]:"read",
+  }[key] || "read"),
+  drayage: (key) => ({
+    [FIELD_KEYS.order_no]: "read",
+    [FIELD_KEYS.status]:   "auto",
+    [FIELD_KEYS.drayage]:  "read",
+    [FIELD_KEYS.warehouse]:"read",
+    [FIELD_KEYS.mbl_no]:   "read",
+    [FIELD_KEYS.container]:"read",
+    [FIELD_KEYS.etd]:      "read",
+    [FIELD_KEYS.eta]:      "read",
+    [FIELD_KEYS.pod]:      "read",
+    [FIELD_KEYS.arrived]:  "edit",
+    [FIELD_KEYS.lfd]:      "edit",
+    [FIELD_KEYS.appt_date]:"edit",
+    [FIELD_KEYS.lrd]:      "edit",
+    [FIELD_KEYS.delivered_dt]:"edit",
+    [FIELD_KEYS.emptied_dt]  :"read",
+    [FIELD_KEYS.returned_date]:"edit",
+  }[key] || "read"),
+  warehouse: (key) => ({
+    [FIELD_KEYS.order_no]: "read",
+    [FIELD_KEYS.status]:   "auto",
+    [FIELD_KEYS.drayage]:  "read",
+    [FIELD_KEYS.warehouse]:"read",
+    [FIELD_KEYS.mbl_no]:   "read",
+    [FIELD_KEYS.container]:"read",
+    [FIELD_KEYS.etd]:      "read",
+    [FIELD_KEYS.eta]:      "read",
+    [FIELD_KEYS.pod]:      "read",
+    [FIELD_KEYS.arrived]:  "read",
+    [FIELD_KEYS.lfd]:      "read",
+    [FIELD_KEYS.lrd]:      "read",
+    [FIELD_KEYS.appt_date]:"read",
+    [FIELD_KEYS.delivered_dt]:"read",
+    [FIELD_KEYS.emptied_dt]  :"edit",
+    [FIELD_KEYS.returned_date]:"read",
+  }[key] || "read"),
+};
+
+// 目前角色：每次取用都讀一次（避免被鎖在舊值）
+function currentRole() {
+  return String(getCurrentUser()?.role || "").trim().toLowerCase();
+}
+
+// 依角色取欄位權限
+function permFor(key, role = currentRole()) {
+  const f = PERMS[role] || (() => "read");
+  return f(key);
+}
+
+// 是否可編輯
+function canEdit(key) {
+  return permFor(key) === "edit";
+}
+
 
 /** 會影響 Status 的欄位 */
 const AFFECTS_STATUS = new Set([
@@ -110,6 +248,9 @@ export default function MyContainers() {
     if (saved) return JSON.parse(saved);
     const w = {}; COLUMNS.forEach(c => (w[c.key] = c.width || 120)); return w;
   });
+  const PAGE_OPTIONS = [50, 100, 200, "All"];
+  const [pageSize, setPageSize] = useState(50);  // 預設 50
+  const [page, setPage] = useState(1);
 
   // 匯入 Excel 的隱藏 input
   const fileInputRef = useRef(null);
@@ -160,12 +301,14 @@ export default function MyContainers() {
 
   /** ➌ 單格變更／失焦正規化＋狀態重算＋MBL 即時檢查 */
   const onCellChange = (idx, key, v) => {
+    if (!canEdit(key)) return;
     setRows(r => {
       const copy = [...r]; copy[idx] = { ...copy[idx], [key]: v }; return copy;
     });
   };
 
   const onCellBlur = (idx, key) => {
+    if (!canEdit(key)) return;
     setRows(r => {
       const copy = [...r];
       const val = copy[idx]?.[key];
@@ -345,6 +488,30 @@ export default function MyContainers() {
     return copy;
   }, [rows, sortKey, sortDir]);
 
+  // 依排序結果計算總頁數
+  const totalPages = useMemo(() => {
+    const size = pageSize === "All" ? (sorted.length || 1) : pageSize;
+    return Math.max(1, Math.ceil(sorted.length / size));
+  }, [sorted, pageSize]);
+
+  // 當 pageSize 或資料量變動，避免 page 超出上限
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
+  // 取出當頁要顯示的資料
+  const paged = useMemo(() => {
+    if (pageSize === "All") return sorted;
+    const start = (page - 1) * pageSize;
+    return sorted.slice(start, start + pageSize);
+  }, [sorted, page, pageSize]);
+
+  // 供工具列顯示「x–y of n」
+  const startIdx = pageSize === "All" ? 0 : (page - 1) * pageSize;
+  const endIdx   = pageSize === "All" ? sorted.length
+                                      : Math.min(sorted.length, startIdx + pageSize);
+
+
   /** ➑ 欄寬拖拉 */
   const dragRef = useRef({ col: "", startX: 0, startW: 0 });
   const onDragStart = (e, colKey) => {
@@ -375,7 +542,7 @@ export default function MyContainers() {
     <div className="p-4">
       <div className="mb-2 flex items-center gap-2">
         <h1 className="text-xl font-bold">My Containers</h1>
-
+        <CurrentUserBadge />
         <button className="px-3 py-1 rounded bg-gray-100 border" onClick={onAddRow}>
           + Add Row
         </button>
@@ -410,10 +577,44 @@ export default function MyContainers() {
           onChange={onImportFile}
         />
 
-        {err && <span className="text-red-600 ml-2">{err}</span>}
+      <div className="ml-auto flex items-center gap-2">
+        <span className="text-sm text-gray-600">Rows:</span>
+        <select
+          className="border rounded px-2 py-1 text-sm"
+          value={pageSize}
+          onChange={(e) => {
+            const v = e.target.value;
+            setPageSize(v === "All" ? "All" : parseInt(v, 10));
+            setPage(1); // 換筆數時回到第 1 頁
+          }}
+        >
+          {PAGE_OPTIONS.map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+
+        <button className="px-2 py-1 border rounded"
+                onClick={() => setPage(1)} disabled={page <= 1}>⏮</button>
+        <button className="px-2 py-1 border rounded"
+                onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>‹</button>
+
+        <span className="text-sm tabular-nums">{page} / {totalPages}</span>
+
+        <button className="px-2 py-1 border rounded"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>›</button>
+        <button className="px-2 py-1 border rounded"
+                onClick={() => setPage(totalPages)} disabled={page >= totalPages}>⏭</button>
+
+        <span className="text-sm text-gray-600 ml-2">
+          {sorted.length ? `${startIdx + 1}–${endIdx} of ${sorted.length}` : "0"}
+        </span>
       </div>
 
-      <div className="overflow-auto border rounded">
+        {err && <span className="text-red-600 ml-2">{err}</span>}
+
+      </div>
+
+      <div className="relative border rounded max-h-[calc(110vh-180px)] overflow-auto">
         <table className="min-w-full border-collapse">
           <thead>
             <tr>
@@ -448,7 +649,7 @@ export default function MyContainers() {
                   No data.
                 </td>
               </tr>
-            ) : sorted.map((row, idx) => (
+            ) : paged.map((row, idx) => (
               <tr key={row._id ?? idx} className="border-t">
                 {/* 勾選欄 */}
                 <td style={{ width: 36, minWidth: 36 }} className="px-2 py-1 align-top">
@@ -471,6 +672,7 @@ export default function MyContainers() {
                       <Cell
                         value={row[col.key]}
                         col={col}
+                        readOnly={!canEdit(col.key)}
                         onChange={(v) => onCellChange(idx, col.key, v)}
                         onBlur={() => onCellBlur(idx, col.key)}
                       />
@@ -497,21 +699,33 @@ export default function MyContainers() {
 }
 
 /** 單格編輯（Status 以外） */
-function Cell({ value, col, onChange, onBlur }) {
+function Cell({ value, col, readOnly = false, onChange, onBlur }) {
   const display = formatForDisplay(value, col);
   const [v, setV] = useState(display);
 
   useEffect(() => setV(display), [display]);
 
+  const baseCls =
+    "w-full border rounded px-2 py-1 text-sm";
+  const roCls =
+    "bg-gray-50 text-gray-500 cursor-not-allowed";
+
   return (
     <input
-      className="w-full border rounded px-2 py-1 text-sm"
+      className={readOnly ? `${baseCls} ${roCls}` : baseCls}
       value={v ?? ""}
-      onChange={(e) => { setV(e.target.value); onChange(e.target.value); }}
-      onBlur={onBlur}
+      disabled={readOnly}
+      tabIndex={readOnly ? -1 : 0}
+      title={readOnly ? "Read only for your role" : ""}
+       onChange={(e) => {
+        if (readOnly) return;
+        setV(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={readOnly ? undefined : onBlur}
       placeholder={
         col.type === "datetime" ? "mm/dd/yy hh:mm am/pm" :
-        col.type === "date"     ? "mm/dd/yy" : ""
+        col.type === "date" ? "mm/dd/yy" : ""
       }
     />
   );
